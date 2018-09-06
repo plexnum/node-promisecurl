@@ -2,28 +2,34 @@
  * Created by horat1us on 11.10.16.
  */
 "use strict";
-const {Cookie, CookieMap} = require('cookiefile'),
-    Curl = require('node-libcurl').Curl;
+const Curl = require('node-libcurl').Curl;
+const {CookieJar, Cookie} = require("tough-cookie");
 
 module.exports = {
+
+
     PromiseCurl: class PromiseCurl {
         constructor({
-            saveCookies = false,
+            jar = null,
             headers = [],
             timeout = 5,
             curlOptions:options = {},
             referer = "google.com",
             proxy = false
         } = {}) {
-            if (saveCookies) {
-                this.initCookies();
+
+            if(!jar) {
+                jar = new CookieJar(null, {
+                    rejectPublicSuffixes: false,
+                    looseMode: true
+                });
             }
 
             this.options = options;
             this.timeout = timeout;
             this.referer = referer;
             this.headers = Array.isArray(headers) ? headers : [headers];
-            this.cookieMap = new CookieMap();
+            this.jar = jar;
             if (proxy !== false && !(proxy instanceof module.exports.Proxy)) {
                 throw new module.exports.PromiseCurlError(6);
             }
@@ -35,7 +41,7 @@ module.exports = {
             method,
             headers = [],
             referer = this.referer,
-            cookies = this.cookieMap,
+            jar = this.jar,
             data: postdata = false,
             url,
             followLocation = true,
@@ -49,17 +55,29 @@ module.exports = {
             if (!url) {
                 throw new module.exports.PromiseCurlError(4);
             }
-            /**
-             * @var {CookieMap} cookies
-             */
-            return new Promise((resolve, reject) => {
+
+            return new Promise(async (resolve, reject) => {
                 const curl = new Curl();
                 let httpHeader = this.headers;
                 if (Array.isArray(headers)) {
                     httpHeader = httpHeader.concat(headers);
                 }
                 httpHeader.filter(header => header.substr(0, 6) !== 'Cookie');
-                httpHeader.push(cookies.toRequestHeader());
+
+                let httpHeaderCookieValue = await new Promise((resolve, reject) => {
+                    jar.getCookieString(url, (err, cookieHeaders) => {
+                        if(err) {
+                            reject(err);
+                        } else {
+                            resolve(cookieHeaders);
+                        }
+
+                    })
+                });
+
+                if(httpHeaderCookieValue) {
+                    httpHeader.push('Cookie: '+httpHeaderCookieValue);
+                }
 
                 Object.assign(currentOptions, {
                     referer, timeout, followLocation, url, httpHeader,
@@ -85,15 +103,31 @@ module.exports = {
                 curlOptions.forEach((nameValue) => curl.setOpt(...nameValue));
 
                 const responseHeaders = [], headersObject = {};
+                const cookiesPromises = [];
+
                 curl.perform()
                     .on('header', (header) => {
                         const responseHeader = header.toString();
-
                         responseHeaders.push(responseHeader);
-                        this.cookieMap.header(responseHeader, {domain: require('url').parse(url).hostname});
+
+                        let cookie = Cookie.parse(responseHeader)
+
+                        if(cookie) {
+
+                            cookiesPromises.push(new Promise((resolve, reject) => {
+                                this.jar.setCookie(cookie, url, (err, cookie) => {
+                                    if(err) {
+                                        reject(err);
+                                    } else {
+                                        resolve(cookie);
+                                    }
+                                })
+                            }));
+                        }
 
                     })
                     .on('end', (statusCode, body) => {
+
                         responseHeaders
                             .map(header => header.replace(/[\n\r]{1,2}/, ''))
                             .filter(header => header.length > 0)
@@ -101,11 +135,18 @@ module.exports = {
                             .map((header) => header.match(/([^:]*):(.*)/))
                             .forEach(([,name,value]) => headersObject[name.trim()] = value.trim());
 
-                        resolve({
-                            statusCode,
-                            body,
-                            cookies: this.cookieMap,
-                            headers: headersObject,
+                        Promise.all(cookiesPromises).then(() => {
+
+                            resolve({
+                                statusCode,
+                                body,
+                                jar: this.jar,
+                                headers: headersObject,
+                            });
+
+                        }, (error) => {
+                            console.log(error);
+                            reject(error);
                         });
 
                     })
@@ -127,10 +168,6 @@ module.exports = {
 
         post(options) {
             return this.request(Object.assign({method: "POST",}, options));
-        }
-
-        initCookies(cookieMap = new CookieMap()) {
-            this.cookieMap = cookieMap;
         }
 
         static initOptions(userOptions = {}, mainOptions = {}) {

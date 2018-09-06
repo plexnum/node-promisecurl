@@ -10,9 +10,8 @@ const assert = require('assert'),
     {PromiseCurl} = require('../index.js');
 
 describe('PromiseCurl Main Tests', () => {
-    const
-        {Cookie, CookieMap} = require('cookiefile'),
-        Url = require('url'),
+        const Url = require('url'),
+        {Cookie} = require('tough-cookie'),
         PostRequestInit = (request, response, onData) => {
             response.writeHead(200, "Success", {"X-Test-Success": true});
             if (request.method.toUpperCase() !== "POST") {
@@ -24,7 +23,11 @@ describe('PromiseCurl Main Tests', () => {
         },
         routes = {
             '/cookies': (request, response) => {
+
+                const {CookieMap, Cookie} = require('cookiefile');
+
                 const cookieMap = new CookieMap();
+
                 cookieMap.generate(request.headers.cookie, {domain: "localhost"});
 
                 let cookieTest = cookieMap.get('test');
@@ -165,31 +168,42 @@ describe('PromiseCurl Main Tests', () => {
 
     describe('Headers Tests', () => {
 
+        const {Proxy} = require('../index.js');
+
         it('#cookies', (done) => {
             this.timeout = 500;
-            const promiseCurl = new PromiseCurl(),
+            const promiseCurl = new PromiseCurl({
+                proxy: new Proxy({
+                    type: 'http',
+                    host: '127.0.0.1',
+                    port: 8881,
+                })
+                }),
                 checkResponse = (response) => {
                     expect(response).to.have.property('statusCode').and.equal(200);
                     expect(response).to.have.property('body').and.equal('success');
-                    expect(response).to.have.property('cookies');
+                    expect(response).to.have.property('jar');
+                    const jar = response.jar;
+                    console.log(response.headers);
 
-                    const cookies = response.cookies;
-                    expect(cookies.size).to.be.at.least(1);
-                    const cookieTest = cookies.get('test');
-                    expect(cookieTest).to.have.property('value').and.equal((++cookieIterator).toString());
+
                 };
             let cookieIterator = 1;
 
-            promiseCurl.cookieMap.set(new Cookie({
-                name: "test",
-                value: cookieIterator,
-                domain: "localhost",
-            }));
-            promiseCurl.cookieMap.set(new Cookie({
-                name: "cookie2",
-                value: "sValue",
-                domain: "localhost",
-            }));
+            promiseCurl.jar.setCookie(new Cookie({
+                key: "test",
+                value: cookieIterator
+            }), 'http://localhost:3000/cookies', () => {
+
+            });
+
+            promiseCurl.jar.setCookie(new Cookie({
+                key: "cookie2",
+                value: "sValue"
+            }), 'http://localhost:3000/cookies', () => {
+
+            });
+
             promiseCurl.get({
                 url: 'http://localhost:3000/cookies',
             }).then(response => {
