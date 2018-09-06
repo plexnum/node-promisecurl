@@ -7,16 +7,15 @@ const {CookieJar, Cookie} = require("tough-cookie");
 
 module.exports = {
 
-
     PromiseCurl: class PromiseCurl {
         constructor({
-            jar = null,
-            headers = [],
-            timeout = 5,
-            curlOptions:options = {},
-            referer = "google.com",
-            proxy = false
-        } = {}) {
+                        jar = null,
+                        headers = [],
+                        timeout = 5,
+                        curlOptions:options = {},
+                        referer = "google.com",
+                        proxy = false
+                    } = {}) {
 
             if(!jar) {
                 jar = new CookieJar(null, {
@@ -38,16 +37,17 @@ module.exports = {
 
 
         request({
-            method,
-            headers = [],
-            referer = this.referer,
-            jar = this.jar,
-            data: postdata = false,
-            url,
-            followLocation = true,
-            timeout = this.timeout,
-            currentOptions = {}
-        }) {
+                    method,
+                    headers = [],
+                    referer = this.referer,
+                    jar = this.jar,
+                    data: postdata = false,
+                    url,
+                    followLocation = true,
+                    timeout = this.timeout,
+                    currentOptions = {}
+                }) {
+
             if (typeof(method) !== 'string') {
                 throw new module.exports.PromiseCurlError(3);
             }
@@ -65,7 +65,11 @@ module.exports = {
                 httpHeader.filter(header => header.substr(0, 6) !== 'Cookie');
 
                 let httpHeaderCookieValue = await new Promise((resolve, reject) => {
+
                     jar.getCookieString(url, (err, cookieHeaders) => {
+
+                        console.log(cookieHeaders);
+
                         if(err) {
                             reject(err);
                         } else {
@@ -74,6 +78,7 @@ module.exports = {
 
                     })
                 });
+
 
                 if(httpHeaderCookieValue) {
                     httpHeader.push('Cookie: '+httpHeaderCookieValue);
@@ -107,29 +112,38 @@ module.exports = {
 
                 curl.perform()
                     .on('header', (header) => {
-                        const responseHeader = header.toString();
+
+                        const responseHeader = header.toString().replace(/[\n\r]{1,2}/, '');
                         responseHeaders.push(responseHeader);
+                        header = responseHeader.split(/:\s(.+)/);
 
-                        let cookie = Cookie.parse(responseHeader)
+                        if(header[0] && header[0].toUpperCase() === 'LOCATION') {
+                            url = header[1].trim();
+                        }
 
-                        if(cookie) {
+                        if(header[0] && header[0].toUpperCase() === 'SET-COOKIE') {
 
                             cookiesPromises.push(new Promise((resolve, reject) => {
-                                this.jar.setCookie(cookie, url, (err, cookie) => {
+
+                                let cookie = Cookie.parse(header[1], {loose: true});
+
+                                this.jar.setCookie(Cookie.parse(header[1], {loose: true}), url, {
+                                    ignoreError: false
+                                }, (err, cookie) => {
+
                                     if(err) {
                                         reject(err);
                                     } else {
-                                        resolve(cookie);
+                                        resolve();
                                     }
                                 })
                             }));
                         }
 
                     })
-                    .on('end', (statusCode, body) => {
+                    .on('end', (statusCode, body, argHeader) => {
 
                         responseHeaders
-                            .map(header => header.replace(/[\n\r]{1,2}/, ''))
                             .filter(header => header.length > 0)
                             .filter(header => header.split(':').length >= 2)
                             .map((header) => header.match(/([^:]*):(.*)/))
@@ -189,10 +203,10 @@ module.exports = {
     },
     Proxy: class Proxy {
         constructor({
-            type = 'http',
-            host, port,
-            username = false, password = false
-        }) {
+                        type = 'http',
+                        host, port,
+                        username = false, password = false
+                    }) {
             if (!host || !port) {
                 throw new module.exports.PromiseCurlError(2);
             }

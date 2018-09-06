@@ -24,29 +24,14 @@ describe('PromiseCurl Main Tests', () => {
         routes = {
             '/cookies': (request, response) => {
 
-                const {CookieMap, Cookie} = require('cookiefile');
+                let headers = [];
 
-                const cookieMap = new CookieMap();
-
-                cookieMap.generate(request.headers.cookie, {domain: "localhost"});
-
-                let cookieTest = cookieMap.get('test');
-                if (!cookieTest) {
-                    cookieMap.set(cookieTest = new Cookie({
-                        name: "test",
-                        value: 0,
-                        domain: "localhost",
-                    }));
-                }
-                /** @var {Cookie} cookieTest */
-                cookieTest.value = ~~cookieTest.value + 1;
-
-                const headers = cookieMap.toResponseHeader()
-                    .map(head => head.match(/([^\:]*)\:(.*)/))
-                    .map(([,name,value]) => [name, value]);
+                headers.push(["Set-Cookie", new Cookie({
+                    key: 'foo',
+                    value: 'bar'
+                }).toString()]);
 
                 headers.push(["X-Promise-Test", true]);
-
                 response.writeHead(200, "Success", headers);
                 response.end('success');
             },
@@ -173,47 +158,25 @@ describe('PromiseCurl Main Tests', () => {
         it('#cookies', (done) => {
             this.timeout = 500;
             const promiseCurl = new PromiseCurl({
-                proxy: new Proxy({
-                    type: 'http',
-                    host: '127.0.0.1',
-                    port: 8881,
-                })
                 }),
                 checkResponse = (response) => {
                     expect(response).to.have.property('statusCode').and.equal(200);
                     expect(response).to.have.property('body').and.equal('success');
                     expect(response).to.have.property('jar');
-                    const jar = response.jar;
-                    console.log(response.headers);
-
-
+                    done();
                 };
+
             let cookieIterator = 1;
 
             promiseCurl.jar.setCookie(new Cookie({
-                key: "test",
-                value: cookieIterator
-            }), 'http://localhost:3000/cookies', () => {
-
-            });
-
-            promiseCurl.jar.setCookie(new Cookie({
-                key: "cookie2",
-                value: "sValue"
-            }), 'http://localhost:3000/cookies', () => {
-
-            });
+                key: "foo",
+                value: "bar"
+            }), 'http://localhost:3000/cookies', () => {});
 
             promiseCurl.get({
                 url: 'http://localhost:3000/cookies',
             }).then(response => {
                 checkResponse(response);
-                return promiseCurl.get({
-                    url: "http://localhost:3000/cookies"
-                });
-            }).then(response => {
-                checkResponse(response);
-                done();
             }).catch(error => done(error));
         });
         it('#cross-query headers', (done) => {
