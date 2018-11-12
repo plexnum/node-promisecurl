@@ -4,6 +4,7 @@
 "use strict";
 const Curl = require('node-libcurl').Curl;
 const {CookieJar, Cookie} = require("tough-cookie");
+const _ = require('lodash');
 
 module.exports = {
 
@@ -13,7 +14,6 @@ module.exports = {
                         headers = [],
                         timeout = 5,
                         curlOptions:options = {},
-                        referer = "google.com",
                         proxy = false
                     } = {}) {
 
@@ -26,7 +26,6 @@ module.exports = {
 
             this.options = options;
             this.timeout = timeout;
-            this.referer = referer;
             this.headers = Array.isArray(headers) ? headers : [headers];
             this.jar = jar;
             if (proxy !== false && !(proxy instanceof module.exports.Proxy)) {
@@ -39,7 +38,6 @@ module.exports = {
         request({
                     method,
                     headers = [],
-                    referer = this.referer,
                     jar = this.jar,
                     data: postdata = false,
                     url,
@@ -62,30 +60,49 @@ module.exports = {
                 if (Array.isArray(headers)) {
                     httpHeader = httpHeader.concat(headers);
                 }
-                httpHeader.filter(header => header.substr(0, 6) !== 'Cookie');
 
-                let httpHeaderCookieValue = await new Promise((resolve, reject) => {
+                let httpHeaderCookies = await new Promise((resolve, reject) => {
 
-                    jar.getCookieString(url, (err, cookieHeaders) => {
-
-                        console.log(cookieHeaders);
+                    jar.getCookies(url, (err, cookies) => {
 
                         if(err) {
                             reject(err);
                         } else {
-                            resolve(cookieHeaders);
+                            resolve(cookies);
                         }
 
                     })
                 });
 
+                let cookieHeaderIndex = httpHeader.findIndex(header => header.substr(0, 6).toLowerCase() === 'cookie');
 
-                if(httpHeaderCookieValue) {
-                    httpHeader.push('Cookie: '+httpHeaderCookieValue);
+                if(httpHeaderCookies.length > 0) {
+
+                    if(cookieHeaderIndex !== -1) {
+
+                        let cookieHeadersOrder = httpHeader[cookieHeaderIndex].replace('Cookie: ', '').split('; ').map((cookiePart) => {
+                            return cookiePart.slice(0, cookiePart.indexOf('='))
+                        })
+
+                        httpHeaderCookies = _.sortBy(httpHeaderCookies, function(cookie){
+                            return cookieHeadersOrder[cookie.key];
+                        });
+
+                        httpHeader[cookieHeaderIndex] = 'Cookie: '+ httpHeaderCookies.map(cookie => cookie.cookieString()).join('; ');
+
+                    }
+
+                } else {
+
+                    if(cookieHeaderIndex !== -1) {
+                        delete httpHeader[cookieHeaderIndex];
+                    }
+
                 }
 
+
                 Object.assign(currentOptions, {
-                    referer, timeout, followLocation, url, httpHeader,
+                    timeout, followLocation, url, httpHeader,
                 });
                 if (method == 'POST' && postdata !== false) {
                     if (Array.isArray(postdata)) {
@@ -128,7 +145,7 @@ module.exports = {
                                 let cookie = Cookie.parse(header[1], {loose: true});
 
                                 this.jar.setCookie(Cookie.parse(header[1], {loose: true}), url, {
-                                    ignoreError: false
+                                    ignoreError: true
                                 }, (err, cookie) => {
 
                                     if(err) {
@@ -158,6 +175,8 @@ module.exports = {
                                 headers: headersObject,
                             });
 
+                            curl.close.bind(curl)();
+
                         }, (error) => {
                             console.log(error);
                             reject(error);
@@ -179,6 +198,7 @@ module.exports = {
         get(options) {
             return this.request(Object.assign({method: "GET",}, options));
         }
+
 
         post(options) {
             return this.request(Object.assign({method: "POST",}, options));
