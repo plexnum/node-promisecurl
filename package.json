@@ -53,6 +53,8 @@
     "node": true
   },
   "dependencies": {
-
+    "cookiefile": "^1.0.9",
+    "lodash": "^4.17.11",
+    "node-libcurl": "^2.1.0"
   }
 }
